@@ -74,9 +74,14 @@ pub struct XRegisters {
 impl XRegisters {
     /// Create a new `XRegisters` object.
     pub fn new() -> Self {
+        Self::with_dram_size(DRAM_SIZE)
+    }
+
+    /// Create a new `XRegisters` object with a custom DRAM size for the stack pointer.
+    pub fn with_dram_size(dram_size: u64) -> Self {
         let mut xregs = [0; REGISTERS_COUNT];
-        // The stack pointer is set in the default maximum memory size + the start address of dram.
-        xregs[2] = DRAM_BASE + DRAM_SIZE;
+        // The stack pointer is set in the maximum memory size + the start address of dram.
+        xregs[2] = DRAM_BASE + dram_size;
         // From riscv-pk:
         // https://github.com/riscv/riscv-pk/blob/master/machine/mentry.S#L233-L235
         //   save a0 and a1; arguments from previous boot loader stage:
@@ -250,6 +255,25 @@ impl Cpu {
             state: State::new(),
             mode: Mode::Machine,
             bus: Bus::new(),
+            enable_paging: false,
+            page_table: 0,
+            reservation_set: Vec::new(),
+            idle: false,
+            inst_counter: BTreeMap::new(),
+            is_count: false,
+            pre_inst: 0,
+        }
+    }
+
+    /// Create a new `Cpu` object with a custom DRAM size.
+    pub fn with_dram_size(dram_size: u64) -> Cpu {
+        Cpu {
+            xregs: XRegisters::with_dram_size(dram_size),
+            fregs: FRegisters::new(),
+            pc: 0,
+            state: State::new(),
+            mode: Mode::Machine,
+            bus: Bus::with_dram_size(dram_size),
             enable_paging: false,
             page_table: 0,
             reservation_set: Vec::new(),

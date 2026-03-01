@@ -1,26 +1,40 @@
 //! The memory module contains the memory structure and implementation to read/write the memory.
 
+use std::fmt;
+
 use crate::bus::DRAM_BASE;
 use crate::cpu::{BYTE, DOUBLEWORD, HALFWORD, WORD};
 use crate::exception::Exception;
 
-/// Default memory size (1GiB).
-pub const DRAM_SIZE: u64 = 1024 * 1024 * 1024;
+/// Default memory size (64 bytes).
+pub const DRAM_SIZE: u64 = 64;
 
 /// The memory used by the emulator.
 #[derive(Debug)]
 pub struct Dram {
     pub dram: Vec<u8>,
     code_size: u64,
+    size: u64,
 }
 
 impl Dram {
     /// Create a new memory object with default memory size.
     pub fn new() -> Self {
+        Self::with_size(DRAM_SIZE)
+    }
+
+    /// Create a new memory object with a custom size in bytes.
+    pub fn with_size(size: u64) -> Self {
         Self {
-            dram: vec![0; DRAM_SIZE as usize],
+            dram: vec![0; size as usize],
             code_size: 0,
+            size,
         }
+    }
+
+    /// Return the size of the DRAM in bytes.
+    pub fn size(&self) -> u64 {
+        self.size
     }
 
     /// Set the binary in the memory.
@@ -119,5 +133,45 @@ impl Dram {
             | ((self.dram[index + 5] as u64) << 40)
             | ((self.dram[index + 6] as u64) << 48)
             | ((self.dram[index + 7] as u64) << 56);
+    }
+}
+
+impl fmt::Display for Dram {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Memory ({} bytes):", self.size)?;
+        let len = self.size as usize;
+        for offset in (0..len).step_by(16) {
+            let end = std::cmp::min(offset + 16, len);
+            // Address column
+            write!(f, "{:08x}: ", DRAM_BASE + offset as u64)?;
+            // Hex columns
+            for i in offset..end {
+                if i > offset && i % 2 == 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{:02x}", self.dram[i])?;
+            }
+            // Pad if the last line is short
+            if end - offset < 16 {
+                let missing = 16 - (end - offset);
+                // Each byte is 2 hex chars; every 2 bytes adds a space
+                let hex_chars = missing * 2 + missing / 2;
+                for _ in 0..hex_chars {
+                    write!(f, " ")?;
+                }
+            }
+            // ASCII column
+            write!(f, "  ")?;
+            for i in offset..end {
+                let b = self.dram[i];
+                if (0x20..=0x7e).contains(&b) {
+                    write!(f, "{}", b as char)?;
+                } else {
+                    write!(f, ".")?;
+                }
+            }
+            writeln!(f)?;
+        }
+        Ok(())
     }
 }

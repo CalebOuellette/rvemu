@@ -20,6 +20,14 @@ impl Emulator {
         }
     }
 
+    /// Constructor for an emulator with a custom DRAM size.
+    pub fn with_dram_size(dram_size: u64) -> Emulator {
+        Self {
+            cpu: Cpu::with_dram_size(dram_size),
+            is_debug: false,
+        }
+    }
+
     /// Reset CPU state.
     pub fn reset(&mut self) {
         self.cpu.reset()
@@ -98,6 +106,8 @@ impl Emulator {
                             inst & 0b11 == 0 || inst & 0b11 == 1 || inst & 0b11 == 2,
                             self.cpu.pre_inst,
                         );
+                        println!("{}", self.cpu.xregs); // Prints the state of the registars
+                        println!("{}", self.cpu.bus.dram());
                     }
                     // Return a placeholder trap.
                     Trap::Requested

@@ -6,6 +6,7 @@ use std::iter::FromIterator;
 
 use rvemu_core::bus::DRAM_BASE;
 use rvemu_core::cpu::Cpu;
+use rvemu_core::dram::DRAM_SIZE;
 use rvemu_core::emulator::Emulator;
 
 /// Output current registers to the console.
@@ -65,6 +66,13 @@ fn main() -> io::Result<()> {
                 .long("count")
                 .help("Enables to count each instruction executed"),
         )
+        .arg(
+            Arg::with_name("memory-size")
+                .short("m")
+                .long("memory-size")
+                .takes_value(true)
+                .help("DRAM size in bytes (default: 1 GiB)"),
+        )
         .get_matches();
 
     let mut kernel_file = File::open(
@@ -80,7 +88,12 @@ fn main() -> io::Result<()> {
         File::open(img_file)?.read_to_end(&mut img_data)?;
     }
 
-    let mut emu = Emulator::new();
+    let dram_size = matches
+        .value_of("memory-size")
+        .map(|s| s.parse::<u64>().expect("memory-size must be a number"))
+        .unwrap_or(DRAM_SIZE);
+
+    let mut emu = Emulator::with_dram_size(dram_size);
 
     emu.initialize_dram(kernel_data);
     emu.initialize_disk(img_data);
