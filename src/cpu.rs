@@ -1339,7 +1339,7 @@ impl Cpu {
 
     /// Execute a general-purpose instruction. Raises an exception if something is wrong,
     /// otherwise, returns a fetched instruction. It also increments the program counter by 4 bytes.
-    fn execute_general(&mut self, inst: u64) -> Result<(), Exception> {
+    pub fn execute_general(&mut self, inst: u64) -> Result<(), Exception> {
         // 2. Decode.
         let opcode = inst & 0x0000007f;
         let rd = (inst & 0x00000f80) >> 7;
