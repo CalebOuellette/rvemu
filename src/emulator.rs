@@ -1,7 +1,7 @@
 //! The emulator module represents an entire computer.
 
 use crate::cpu::Cpu;
-use crate::exception::Trap;
+use crate::exception::{Exception, Trap};
 
 /// The emulator to hold a CPU.
 pub struct Emulator {
@@ -68,6 +68,10 @@ impl Emulator {
                     println!("pc: {:#x}, inst: {:#x}", self.cpu.pc.wrapping_sub(4), inst);
                     Trap::Requested
                 }
+                Err(Exception::Breakpoint) => {
+                    println!("pc: {:#x}, halt (ebreak)", self.cpu.pc);
+                    return;
+                }
                 Err(exception) => {
                     println!("pc: {:#x}, exception: {:?}", self.cpu.pc, exception);
                     exception.take_trap(&mut self.cpu)
@@ -112,6 +116,10 @@ impl Emulator {
                     // Return a placeholder trap.
                     Trap::Requested
                 }
+                Err(Exception::Breakpoint) => {
+                    println!("pc: {:#x}, halt (ebreak)", self.cpu.pc);
+                    return;
+                }
                 Err(exception) => exception.take_trap(&mut self.cpu),
             };
 
@@ -146,6 +154,10 @@ impl Emulator {
                 Ok(_) => {
                     // Return a placeholder trap.
                     Trap::Requested
+                }
+                Err(Exception::Breakpoint) => {
+                    println!("pc: {:#x}, halt (ebreak)", self.cpu.pc);
+                    return;
                 }
                 Err(exception) => exception.take_trap(&mut self.cpu),
             };
