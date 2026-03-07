@@ -39,9 +39,14 @@ fn dump_count(cpu: &Cpu) {
 }
 
 /// Run the emulator in LLM mode: instead of fetching instructions from DRAM,
-/// ask an Ollama LLM for the next instruction based on current CPU state.
-fn llm_start(emu: &mut Emulator, executor: &mut llm::LlmExecutor) {
+/// ask an OpenAI-compatible LLM for the next instruction based on current CPU state.
+fn llm_start(
+    emu: &mut Emulator,
+    executor: &mut llm::LlmExecutor,
+    max_instructions: Option<u64>,
+) {
     let max_retries = 3;
+    let mut executed_instructions = 0u64;
 
     loop {
         // Run a cycle on peripheral devices.
@@ -60,7 +65,7 @@ fn llm_start(emu: &mut Emulator, executor: &mut llm::LlmExecutor) {
 
         let mut response = None;
         for attempt in 0..max_retries {
-            match executor.call_ollama(&prompt) {
+            match executor.call_api(&prompt) {
                 Ok(resp) => {
                     response = Some(resp);
                     break;
@@ -118,6 +123,7 @@ fn llm_start(emu: &mut Emulator, executor: &mut llm::LlmExecutor) {
 
         // Record instruction
         executor.record_instruction(current_pc, inst, response_text.clone());
+        executed_instructions += 1;
 
         // Print state after execution
         println!(
@@ -132,11 +138,24 @@ fn llm_start(emu: &mut Emulator, executor: &mut llm::LlmExecutor) {
             }
             _ => {}
         }
+
+        if let Some(limit) = max_instructions {
+            if executed_instructions >= limit {
+                println!(
+                    "[LLM] Reached instruction limit ({}). Halting.",
+                    limit
+                );
+                return;
+            }
+        }
     }
 }
 
 /// Main function of RISC-V emulator for the CLI version.
 fn main() -> io::Result<()> {
+    // Load environment variables from .env in the current directory or parents.
+    let _ = dotenvy::dotenv();
+
     let matches = App::new("rvemu: RISC-V emulator")
         .version("0.0.1")
         .author("Asami Doi <@d0iasm>")
@@ -177,21 +196,19 @@ fn main() -> io::Result<()> {
         .arg(
             Arg::with_name("llm")
                 .long("llm")
-                .help("Enable LLM-driven instruction execution via Ollama"),
+                .help("Enable LLM-driven instruction execution via an OpenAI-compatible API"),
         )
         .arg(
             Arg::with_name("model")
                 .long("model")
                 .takes_value(true)
-                .default_value("gpt-oss:20b")
-                .help("Ollama model to use (default: gpt-oss20b)"),
+                .help("Model name for the OpenAI-compatible API (overrides OPENAI_MODEL)"),
         )
         .arg(
-            Arg::with_name("ollama-url")
-                .long("ollama-url")
+            Arg::with_name("llm-max-instructions")
+                .long("llm-max-instructions")
                 .takes_value(true)
-                .default_value("http://localhost:11434")
-                .help("Ollama API base URL"),
+                .help("Maximum number of LLM-generated instructions to execute before halting"),
         )
         .get_matches();
 
@@ -228,11 +245,33 @@ fn main() -> io::Result<()> {
     }
 
     if matches.is_present("llm") {
-        let model = matches.value_of("model").unwrap().to_string();
-        let ollama_url = matches.value_of("ollama-url").unwrap().to_string();
-        println!("[LLM] Starting LLM-driven execution with model '{}' at {}", model, ollama_url);
-        let mut executor = llm::LlmExecutor::new(model, ollama_url);
-        llm_start(&mut emu, &mut executor);
+        let llm_max_instructions = matches
+            .value_of("llm-max-instructions")
+            .map(|s| {
+                s.parse::<u64>()
+                    .expect("llm-max-instructions must be a positive integer")
+            });
+        let model = matches
+            .value_of("model")
+            .map(|s| s.to_string())
+            .or_else(|| std::env::var("OPENAI_MODEL").ok())
+            .or_else(|| std::env::var("OPENAI_API_MODEL").ok())
+            .unwrap_or_else(|| "gpt-5.3-codex".to_string());
+        let api_base_url = std::env::var("OPENAI_API_BASE_URL")
+            .or_else(|_| std::env::var("OPENAI_BASE_URL"))
+            .or_else(|_| std::env::var("OPENAI_URL"))
+            .unwrap_or_else(|_| "https://api.openai.com".to_string());
+        let api_key = std::env::var("OPENAI_API_KEY")
+            .or_else(|_| std::env::var("OPENAI_KEY"))
+            .expect(
+                "OPENAI_API_KEY is required in --llm mode (fallback: OPENAI_KEY)",
+            );
+        println!(
+            "[LLM] Starting LLM-driven execution with model '{}' at {}",
+            model, api_base_url
+        );
+        let mut executor = llm::LlmExecutor::new(model, api_base_url, api_key);
+        llm_start(&mut emu, &mut executor, llm_max_instructions);
     } else {
         emu.start();
     }

@@ -1,7 +1,8 @@
-/// Ollama LLM client for generating RISC-V instructions from CPU state.
+/// OpenAI-compatible LLM client for generating RISC-V instructions from CPU state.
 
 use crate::assembler;
 use rvemu_core::cpu::Cpu;
+use serde::{Deserialize, Serialize};
 
 /// A record of a previously executed instruction.
 pub struct InstructionRecord {
@@ -10,20 +11,22 @@ pub struct InstructionRecord {
     pub description: String,
 }
 
-/// The LLM executor that manages Ollama communication and instruction history.
+/// The LLM executor that manages OpenAI-compatible API communication and instruction history.
 pub struct LlmExecutor {
     client: reqwest::blocking::Client,
     pub model: String,
-    pub ollama_url: String,
+    pub api_base_url: String,
+    pub api_key: String,
     pub history: Vec<InstructionRecord>,
 }
 
 impl LlmExecutor {
-    pub fn new(model: String, ollama_url: String) -> Self {
+    pub fn new(model: String, api_base_url: String, api_key: String) -> Self {
         Self {
             client: reqwest::blocking::Client::new(),
             model,
-            ollama_url,
+            api_base_url,
+            api_key,
             history: Vec::new(),
         }
     }
@@ -93,38 +96,47 @@ impl LlmExecutor {
         prompt
     }
 
-    /// Call the Ollama API to generate a response.
-    pub fn call_ollama(&self, prompt: &str) -> Result<String, String> {
-        let url = format!("{}/api/generate", self.ollama_url);
-        let body = serde_json::json!({
-            "model": self.model,
-            "prompt": prompt,
-            "stream": false
-        });
+    /// Call an OpenAI-compatible Chat Completions API to generate a response.
+    pub fn call_api(&self, prompt: &str) -> Result<String, String> {
+        let chat_url = format!(
+            "{}/v1/chat/completions",
+            self.api_base_url.trim_end_matches('/')
+        );
+        let chat_body = ChatCompletionsRequest {
+            model: self.model.clone(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
+            temperature: 0.0,
+        };
 
         let response = self
             .client
-            .post(&url)
-            .json(&body)
+            .post(&chat_url)
+            .bearer_auth(&self.api_key)
+            .json(&chat_body)
             .send()
-            .map_err(|e| format!("Ollama request failed: {}", e))?;
+            .map_err(|e| format!("API request failed: {}", e))?;
 
         if !response.status().is_success() {
             return Err(format!(
-                "Ollama returned status {}: {}",
+                "API returned status {}: {}",
                 response.status(),
                 response.text().unwrap_or_default()
             ));
         }
 
-        let json: serde_json::Value = response
+        let json: ChatCompletionsResponse = response
             .json()
-            .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
+            .map_err(|e| format!("Failed to parse API response: {}", e))?;
 
-        json["response"]
-            .as_str()
+        json.choices
+            .first()
+            .and_then(|choice| choice.message.content.as_deref())
             .map(|s| s.trim().to_string())
-            .ok_or_else(|| "No 'response' field in Ollama output".to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "No text content in API response choices[0].message.content".to_string())
     }
 
     /// Parse the LLM response into a u64 instruction.
@@ -160,4 +172,32 @@ impl LlmExecutor {
             self.history.remove(0);
         }
     }
+}
+
+#[derive(Serialize)]
+struct ChatCompletionsRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    temperature: f32,
+}
+
+#[derive(Serialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct ChatCompletionsResponse {
+    choices: Vec<ChatChoice>,
+}
+
+#[derive(Deserialize)]
+struct ChatChoice {
+    message: ChatResponseMessage,
+}
+
+#[derive(Deserialize)]
+struct ChatResponseMessage {
+    content: Option<String>,
 }

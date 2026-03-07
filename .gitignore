@@ -8,3 +8,5 @@ pkg/
 wasm-pack.log
 www/dist
 **/node_modules
+.env
+.env.*
