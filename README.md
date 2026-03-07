@@ -77,6 +77,25 @@ binary should have no headers.
 $ ./target/release/rvemu-cli -k <your-binary>
 ```
 
+**LLM mode with memory inputs**
+
+In `--llm` mode, `-k/--kernel` is optional. You can provide:
+- `--starting-memory <file>`: initial DRAM bytes (remaining DRAM bytes start as `0x00`)
+- `--goal-file <file>`: desired DRAM bytes at `0x8000_0000`; LLM execution halts when this prefix matches
+
+Example using the sample files in this repository:
+```
+$ OPENAI_API_KEY=<your-key> ./target/release/rvemu-cli \
+    --llm \
+    --memory-size 64 \
+    --starting-memory examples/llm/starting-memory.bin \
+    --goal-file examples/llm/goal-memory.bin \
+    --llm-max-instructions 200
+```
+
+`examples/llm/starting-memory.bin` now starts with instruction bytes at
+`0x8000_0000` (matching normal RISC-V DRAM layout), followed by zero padding.
+
 ## Build
 
 ### For Web Application

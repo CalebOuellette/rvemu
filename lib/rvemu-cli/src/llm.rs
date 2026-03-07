@@ -17,18 +17,32 @@ pub struct LlmExecutor {
     pub model: String,
     pub api_base_url: String,
     pub api_key: String,
+    pub goal_memory: Option<Vec<u8>>,
     pub history: Vec<InstructionRecord>,
 }
 
 impl LlmExecutor {
-    pub fn new(model: String, api_base_url: String, api_key: String) -> Self {
-        Self {
-            client: reqwest::blocking::Client::new(),
+    pub fn new(
+        model: String,
+        api_base_url: String,
+        api_key: String,
+        goal_memory: Option<Vec<u8>>,
+    ) -> Result<Self, String> {
+        let client = reqwest::blocking::Client::builder()
+            // Avoid macOS system proxy autodiscovery path, which can panic on
+            // some host environments.
+            .no_proxy()
+            .build()
+            .map_err(|e| format!("failed to initialize HTTP client: {}", e))?;
+
+        Ok(Self {
+            client,
             model,
             api_base_url,
             api_key,
+            goal_memory,
             history: Vec::new(),
-        }
+        })
     }
 
     /// Build a prompt from the current CPU state and instruction history.
@@ -71,6 +85,31 @@ impl LlmExecutor {
                         prompt.push(' ');
                     }
                     prompt.push_str(&format!("{:02x}", dram.dram[i as usize]));
+                }
+                prompt.push('\n');
+            }
+        }
+
+        if let Some(goal) = &self.goal_memory {
+            prompt.push_str(
+                "\n=== Goal Memory ===\n\
+                 The bytes below are the desired DRAM contents starting at 0x80000000.\n\
+                 Bytes not specified in this goal are expected to remain zero.\n",
+            );
+            let preview_len = std::cmp::min(goal.len(), 256);
+            prompt.push_str(&format!(
+                "Goal file bytes: {} (showing first {} bytes)\n",
+                goal.len(),
+                preview_len
+            ));
+            for offset in (0..preview_len).step_by(16) {
+                let end = std::cmp::min(offset + 16, preview_len);
+                prompt.push_str(&format!("{:08x}: ", 0x8000_0000u64 + offset as u64));
+                for i in offset..end {
+                    if i > offset && i % 2 == 0 {
+                        prompt.push(' ');
+                    }
+                    prompt.push_str(&format!("{:02x}", goal[i]));
                 }
                 prompt.push('\n');
             }
