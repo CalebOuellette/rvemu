@@ -66,6 +66,11 @@ impl LlmExecutor {
         // Memory state
         let dram = cpu.bus.dram();
         let dram_size = dram.size();
+        prompt.push_str(&format!(
+            "DRAM base: 0x80000000, DRAM size: {} bytes, valid DRAM range: [0x80000000, {:#x}]\n",
+            dram_size,
+            0x8000_0000u64 + dram_size.saturating_sub(1)
+        ));
         if dram_size <= 1024 {
             // Small DRAM: dump everything
             prompt.push_str(&format!("{}\n", dram));
@@ -182,17 +187,24 @@ impl LlmExecutor {
     /// Tries hex extraction first, then falls back to assembly parsing.
     pub fn parse_response(&self, response: &str) -> Result<u64, String> {
         let response = response.trim();
-
-        // Try to find a hex instruction (0x prefix)
-        for token in response.split_whitespace() {
-            let token = token.trim_end_matches(|c: char| !c.is_ascii_hexdigit() && c != 'x' && c != 'X');
-            if let Some(hex_str) = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
-                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
-                    if val <= 0xFFFFFFFF {
-                        return Ok(val);
-                    }
-                }
+        // Accept a raw machine-word only when the whole response is a hex literal.
+        // This avoids misparsing assembly immediates like `lui t2, 0x80000` as the full
+        // instruction word.
+        let hex_only = response
+            .strip_prefix("0x")
+            .or_else(|| response.strip_prefix("0X"))
+            .filter(|hex| !hex.is_empty())
+            .filter(|hex| hex.chars().all(|c| c.is_ascii_hexdigit()));
+        if let Some(hex_str) = hex_only {
+            let val = u64::from_str_radix(hex_str, 16)
+                .map_err(|e| format!("bad hex instruction '{}': {}", response, e))?;
+            if val <= 0xFFFF_FFFF {
+                return Ok(val);
             }
+            return Err(format!(
+                "hex instruction out of 32-bit range: {}",
+                response
+            ));
         }
 
         // Fall back to assembler
@@ -239,4 +251,37 @@ struct ChatChoice {
 #[derive(Deserialize)]
 struct ChatResponseMessage {
     content: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LlmExecutor;
+
+    fn make_executor() -> LlmExecutor {
+        LlmExecutor::new(
+            "dummy".to_string(),
+            "https://api.openai.com".to_string(),
+            "dummy".to_string(),
+            None,
+        )
+        .expect("executor should initialize")
+    }
+
+    #[test]
+    fn parse_response_parses_hex_machine_word() {
+        let ex = make_executor();
+        let inst = ex
+            .parse_response("0x02a00293")
+            .expect("hex instruction should parse");
+        assert_eq!(inst, 0x02a0_0293);
+    }
+
+    #[test]
+    fn parse_response_prefers_assembly_when_line_contains_hex_immediate() {
+        let ex = make_executor();
+        let inst = ex
+            .parse_response("lui t2, 0x80000")
+            .expect("assembly should parse");
+        assert_eq!(inst, 0x8000_03b7);
+    }
 }
