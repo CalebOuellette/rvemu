@@ -52,9 +52,8 @@ impl LlmExecutor {
         prompt.push_str(
             "You are a RISC-V CPU simulator. Given the current CPU state, generate the next \
              single RISC-V instruction to execute. You MUST respond with ONLY the instruction, \
-             nothing else. The instruction can be either:\n\
-             1. A hex-encoded 32-bit instruction (e.g., 0x00a00513)\n\
-             2. A RISC-V assembly mnemonic (e.g., addi a0, x0, 10)\n\n\
+             nothing else. The instruction must be a single RISC-V assembly mnemonic \
+             (e.g., addi a0, x0, 10).\n\n\
              Do NOT include any explanation, comments, or extra text. Just the instruction.\n\n",
         );
 
@@ -184,30 +183,16 @@ impl LlmExecutor {
     }
 
     /// Parse the LLM response into a u64 instruction.
-    /// Tries hex extraction first, then falls back to assembly parsing.
+    /// Only assembly responses are accepted.
     pub fn parse_response(&self, response: &str) -> Result<u64, String> {
         let response = response.trim();
-        // Accept a raw machine-word only when the whole response is a hex literal.
-        // This avoids misparsing assembly immediates like `lui t2, 0x80000` as the full
-        // instruction word.
-        let hex_only = response
-            .strip_prefix("0x")
-            .or_else(|| response.strip_prefix("0X"))
-            .filter(|hex| !hex.is_empty())
-            .filter(|hex| hex.chars().all(|c| c.is_ascii_hexdigit()));
-        if let Some(hex_str) = hex_only {
-            let val = u64::from_str_radix(hex_str, 16)
-                .map_err(|e| format!("bad hex instruction '{}': {}", response, e))?;
-            if val <= 0xFFFF_FFFF {
-                return Ok(val);
-            }
-            return Err(format!(
-                "hex instruction out of 32-bit range: {}",
-                response
-            ));
+        if response.starts_with("0x") || response.starts_with("0X") {
+            return Err(
+                "hex machine-word responses are not supported; return assembly mnemonic"
+                    .to_string(),
+            );
         }
 
-        // Fall back to assembler
         let inst = assembler::assemble(response)?;
         Ok(inst as u64)
     }
@@ -268,12 +253,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_response_parses_hex_machine_word() {
+    fn parse_response_rejects_hex_machine_word() {
         let ex = make_executor();
-        let inst = ex
+        let err = ex
             .parse_response("0x02a00293")
-            .expect("hex instruction should parse");
-        assert_eq!(inst, 0x02a0_0293);
+            .expect_err("hex instruction should not parse");
+        assert!(err.contains("not supported"));
     }
 
     #[test]
