@@ -1,7 +1,7 @@
 //! The emulator module represents an entire computer.
 
 use crate::cpu::Cpu;
-use crate::exception::Trap;
+use crate::exception::{Exception, Trap};
 
 /// The emulator to hold a CPU.
 pub struct Emulator {
@@ -16,6 +16,14 @@ impl Emulator {
     pub fn new() -> Emulator {
         Self {
             cpu: Cpu::new(),
+            is_debug: false,
+        }
+    }
+
+    /// Constructor for an emulator with a custom DRAM size.
+    pub fn with_dram_size(dram_size: u64) -> Emulator {
+        Self {
+            cpu: Cpu::with_dram_size(dram_size),
             is_debug: false,
         }
     }
@@ -60,6 +68,10 @@ impl Emulator {
                     println!("pc: {:#x}, inst: {:#x}", self.cpu.pc.wrapping_sub(4), inst);
                     Trap::Requested
                 }
+                Err(Exception::Breakpoint) => {
+                    println!("pc: {:#x}, halt (ebreak)", self.cpu.pc);
+                    return;
+                }
                 Err(exception) => {
                     println!("pc: {:#x}, exception: {:?}", self.cpu.pc, exception);
                     exception.take_trap(&mut self.cpu)
@@ -98,9 +110,15 @@ impl Emulator {
                             inst & 0b11 == 0 || inst & 0b11 == 1 || inst & 0b11 == 2,
                             self.cpu.pre_inst,
                         );
+                        println!("{}", self.cpu.xregs); // Prints the state of the registars
+                        println!("{}", self.cpu.bus.dram());
                     }
                     // Return a placeholder trap.
                     Trap::Requested
+                }
+                Err(Exception::Breakpoint) => {
+                    println!("pc: {:#x}, halt (ebreak)", self.cpu.pc);
+                    return;
                 }
                 Err(exception) => exception.take_trap(&mut self.cpu),
             };
@@ -136,6 +154,10 @@ impl Emulator {
                 Ok(_) => {
                     // Return a placeholder trap.
                     Trap::Requested
+                }
+                Err(Exception::Breakpoint) => {
+                    println!("pc: {:#x}, halt (ebreak)", self.cpu.pc);
+                    return;
                 }
                 Err(exception) => exception.take_trap(&mut self.cpu),
             };

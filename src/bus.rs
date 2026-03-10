@@ -2,7 +2,7 @@
 //! devices.
 
 use crate::devices::{clint::Clint, plic::Plic, uart::Uart, virtio_blk::Virtio};
-use crate::dram::{Dram, DRAM_SIZE};
+use crate::dram::Dram;
 use crate::exception::Exception;
 use crate::rom::Rom;
 
@@ -41,8 +41,6 @@ const VIRTIO_END: u64 = VIRTIO_BASE + 0x1000;
 
 /// The address which DRAM starts.
 pub const DRAM_BASE: u64 = 0x8000_0000;
-/// The address which DRAM ends.
-const DRAM_END: u64 = DRAM_BASE + DRAM_SIZE;
 
 /// The system bus.
 pub struct Bus {
@@ -67,6 +65,23 @@ impl Bus {
         }
     }
 
+    /// Create a new bus object with a custom DRAM size.
+    pub fn with_dram_size(size: u64) -> Bus {
+        Self {
+            clint: Clint::new(),
+            plic: Plic::new(),
+            uart: Uart::new(),
+            virtio: Virtio::new(),
+            dram: Dram::with_size(size),
+            rom: Rom::new(),
+        }
+    }
+
+    /// Return a reference to the DRAM.
+    pub fn dram(&self) -> &Dram {
+        &self.dram
+    }
+
     /// Set the binary data to the memory.
     pub fn initialize_dram(&mut self, data: Vec<u8>) {
         self.dram.initialize(data);
@@ -85,7 +100,9 @@ impl Bus {
             PLIC_BASE..=PLIC_END => self.plic.read(addr, size),
             UART_BASE..=UART_END => self.uart.read(addr, size),
             VIRTIO_BASE..=VIRTIO_END => self.virtio.read(addr, size),
-            DRAM_BASE..=DRAM_END => self.dram.read(addr, size),
+            _ if addr >= DRAM_BASE && addr <= DRAM_BASE + self.dram.size() => {
+                self.dram.read(addr, size)
+            }
             _ => Err(Exception::LoadAccessFault),
         }
     }
@@ -97,7 +114,9 @@ impl Bus {
             PLIC_BASE..=PLIC_END => self.plic.write(addr, value, size),
             UART_BASE..=UART_END => self.uart.write(addr, value as u8, size),
             VIRTIO_BASE..=VIRTIO_END => self.virtio.write(addr, value as u32, size),
-            DRAM_BASE..=DRAM_END => self.dram.write(addr, value, size),
+            _ if addr >= DRAM_BASE && addr <= DRAM_BASE + self.dram.size() => {
+                self.dram.write(addr, value, size)
+            }
             _ => Err(Exception::StoreAMOAccessFault),
         }
     }

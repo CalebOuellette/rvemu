@@ -1,5 +1,4 @@
 ROOT_DIR := $(shell pwd)
-
 rvemu: rvemu-wasm rvemu-cli
 
 rvemu-wasm:
@@ -7,6 +6,9 @@ rvemu-wasm:
 
 rvemu-cli:
 	cargo build --release --manifest-path lib/rvemu-cli/Cargo.toml
+
+assemble:
+	./scripts/assemble-riscv.sh
 
 test:
 	RUST_BACKTRACE=1 cargo test -- --nocapture --test-threads=1
