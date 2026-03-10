@@ -284,6 +284,11 @@ fn main() -> io::Result<()> {
                 .help("Maximum number of LLM-generated instructions to execute before halting"),
         )
         .arg(
+            Arg::with_name("llm-mock")
+                .long("llm-mock")
+                .help("Use a built-in mock LLM program (no network/API key required)"),
+        )
+        .arg(
             Arg::with_name("starting-memory")
                 .long("starting-memory")
                 .takes_value(true)
@@ -392,7 +397,8 @@ fn main() -> io::Result<()> {
     }
 
     if llm_enabled {
-        let llm_max_instructions = matches
+        let llm_mock = matches.is_present("llm-mock");
+        let mut llm_max_instructions = matches
             .value_of("llm-max-instructions")
             .map(|s| {
                 s.parse::<u64>()
@@ -408,11 +414,25 @@ fn main() -> io::Result<()> {
             .or_else(|_| std::env::var("OPENAI_BASE_URL"))
             .or_else(|_| std::env::var("OPENAI_URL"))
             .unwrap_or_else(|_| "https://api.openai.com".to_string());
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .or_else(|_| std::env::var("OPENAI_KEY"))
-            .expect(
-                "OPENAI_API_KEY is required in --llm mode (fallback: OPENAI_KEY)",
-            );
+        let api_key = if llm_mock {
+            String::new()
+        } else {
+            std::env::var("OPENAI_API_KEY")
+                .or_else(|_| std::env::var("OPENAI_KEY"))
+                .expect("OPENAI_API_KEY is required in --llm mode (fallback: OPENAI_KEY)")
+        };
+        let mock_program = if llm_mock {
+            // Writes byte value 0x2a to DRAM[0x8000_0000], then exits.
+            Some(vec![
+                "addi t1, x0, 42".to_string(),
+                "sb t1, -64(sp)".to_string(),
+            ])
+        } else {
+            None
+        };
+        if llm_mock && llm_max_instructions.is_none() {
+            llm_max_instructions = mock_program.as_ref().map(|p| p.len() as u64);
+        }
         println!(
             "[LLM] Starting LLM-driven execution with model '{}' at {}",
             model, api_base_url
@@ -421,6 +441,7 @@ fn main() -> io::Result<()> {
             model,
             api_base_url,
             api_key,
+            mock_program,
             goal_memory_data.clone(),
         )
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;

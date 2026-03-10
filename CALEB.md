@@ -28,3 +28,8 @@ LLM with instruction limit
 ```sh
 cargo run -p rvemu-cli -- -k examples/mem_readwrite.bin --llm --model gpt-4.1-mini --llm-max-instructions 1
 ```
+
+LLM mock mode (no API key/network)
+```sh
+cargo run -p rvemu-cli -- --llm --llm-mock --memory-size 64 --goal-file examples/llm/mock-goal.bin
+```

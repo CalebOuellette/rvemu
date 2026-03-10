@@ -77,11 +77,19 @@ binary should have no headers.
 $ ./target/release/rvemu-cli -k <your-binary>
 ```
 
+If you start from an assembly file, first assemble the files in `bin/raw`, then
+pass the generated `.bin` file to `-k`.
+```
+$ ./scripts/assemble-riscv.sh
+$ ./target/release/rvemu-cli -k bin/raw/loop.bin
+```
+
 **LLM mode with memory inputs**
 
 In `--llm` mode, `-k/--kernel` is optional. You can provide:
 - `--starting-memory <file>`: initial DRAM bytes (remaining DRAM bytes start as `0x00`)
 - `--goal-file <file>`: desired DRAM bytes at `0x8000_0000`; LLM execution halts when this prefix matches
+- `--llm-mock`: run a built-in mock instruction sequence (no API key/network required)
 
 Example using the sample files in this repository:
 ```
@@ -95,6 +103,20 @@ $ OPENAI_API_KEY=<your-key> ./target/release/rvemu-cli \
 
 `examples/llm/starting-memory.bin` now starts with instruction bytes at
 `0x8000_0000` (matching normal RISC-V DRAM layout), followed by zero padding.
+
+**LLM mock mode**
+
+`--llm-mock` returns a fixed assembly sequence that writes byte `0x2a` to
+`0x8000_0000`. This is useful for testing the LLM execution path without
+calling an external API.
+
+```
+$ ./target/release/rvemu-cli \
+    --llm \
+    --llm-mock \
+    --memory-size 64 \
+    --goal-file examples/llm/mock-goal.bin
+```
 
 ## Build
 
@@ -160,6 +182,39 @@ $ riscv64-unknown-elf-gcc -Wl,-Ttext=0x80000000 -nostdlib -o foo foo.s
 
 // Remove headers from a binary file.
 $ riscv64-unknown-elf-objcopy -O binary foo foo.text
+```
+
+### Bare-metal Assembly Program
+
+This repository now includes a helper script for `.s` files in `bin/raw`:
+
+```
+$ ./scripts/assemble-riscv.sh
+```
+
+Or via `make`:
+
+```
+$ make assemble
+```
+
+The script:
+- compiles every `.s` and `.S` file in `bin/raw` into a matching `.bin`
+- links your program at `0x8000_0000`, which matches rvemu DRAM start
+- strips ELF headers and emits a raw `.bin`
+- uses `riscv64-unknown-elf-*` or `riscv64-linux-gnu-*`
+
+It also supports single-file usage when needed:
+
+```
+$ ./scripts/assemble-riscv.sh bin/raw/loop.s
+$ ./scripts/assemble-riscv.sh bin/raw/write_42.s examples/asm/write_42.bin
+```
+
+You can override the toolchain prefix with `RISCV_PREFIX`, for example:
+
+```
+$ RISCV_PREFIX=riscv64-unknown-elf ./scripts/assemble-riscv.sh bin/raw/loop.s
 ```
 
 ### Linux

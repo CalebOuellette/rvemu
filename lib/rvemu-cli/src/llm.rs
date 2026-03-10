@@ -17,6 +17,7 @@ pub struct LlmExecutor {
     pub model: String,
     pub api_base_url: String,
     pub api_key: String,
+    pub mock_program: Option<Vec<String>>,
     pub goal_memory: Option<Vec<u8>>,
     pub history: Vec<InstructionRecord>,
 }
@@ -26,6 +27,7 @@ impl LlmExecutor {
         model: String,
         api_base_url: String,
         api_key: String,
+        mock_program: Option<Vec<String>>,
         goal_memory: Option<Vec<u8>>,
     ) -> Result<Self, String> {
         let client = reqwest::blocking::Client::builder()
@@ -40,6 +42,7 @@ impl LlmExecutor {
             model,
             api_base_url,
             api_key,
+            mock_program,
             goal_memory,
             history: Vec::new(),
         })
@@ -141,6 +144,13 @@ impl LlmExecutor {
 
     /// Call an OpenAI-compatible Chat Completions API to generate a response.
     pub fn call_api(&self, prompt: &str) -> Result<String, String> {
+        if let Some(program) = &self.mock_program {
+            return program
+                .get(self.history.len())
+                .cloned()
+                .ok_or_else(|| "mock program exhausted".to_string());
+        }
+
         let chat_url = format!(
             "{}/v1/chat/completions",
             self.api_base_url.trim_end_matches('/')
@@ -248,6 +258,7 @@ mod tests {
             "https://api.openai.com".to_string(),
             "dummy".to_string(),
             None,
+            None,
         )
         .expect("executor should initialize")
     }
@@ -268,5 +279,25 @@ mod tests {
             .parse_response("lui t2, 0x80000")
             .expect("assembly should parse");
         assert_eq!(inst, 0x8000_03b7);
+    }
+
+    #[test]
+    fn mock_program_returns_scripted_sequence() {
+        let mut ex = LlmExecutor::new(
+            "dummy".to_string(),
+            "https://api.openai.com".to_string(),
+            "dummy".to_string(),
+            Some(vec!["addi a0, x0, 1".to_string(), "ecall".to_string()]),
+            None,
+        )
+        .expect("executor should initialize");
+
+        assert_eq!(
+            ex.call_api("ignored").expect("first mock response"),
+            "addi a0, x0, 1"
+        );
+        ex.record_instruction(0x8000_0000, 0x00100513, "addi a0, x0, 1".to_string());
+
+        assert_eq!(ex.call_api("ignored").expect("second mock response"), "ecall");
     }
 }
